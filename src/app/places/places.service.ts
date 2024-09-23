@@ -62,57 +62,61 @@ export class PlacesService {
   constructor(private authService: AuthService, private http: HttpClient) {}
 
   fetchPlaces() {
-    return this.http
-      .get<{ [key: string]: PlaceData }>(
-        'https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places.json'
-      )
-      .pipe(
-        map((resData) => {
-          const places = [];
-          for (const key in resData) {
-            if (resData.hasOwnProperty(key)) {
-              places.push(
-                new Place(
-                  key,
-                  resData[key].title,
-                  resData[key].description,
-                  resData[key].imageUrl,
-                  resData[key].price,
-                  new Date(resData[key].availableFrom),
-                  new Date(resData[key].availableTo),
-                  resData[key].userId
-                )
-              );
-            }
+    return this.authService.token.pipe(
+      take(1),
+      switchMap((token) => {
+        return this.http.get<{ [key: string]: PlaceData }>(
+          `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places.json?auth=${token}`
+        );
+      }),
+      map((resData) => {
+        const places = [];
+        for (const key in resData) {
+          if (resData.hasOwnProperty(key)) {
+            places.push(
+              new Place(
+                key,
+                resData[key].title,
+                resData[key].description,
+                resData[key].imageUrl,
+                resData[key].price,
+                new Date(resData[key].availableFrom),
+                new Date(resData[key].availableTo),
+                resData[key].userId
+              )
+            );
           }
-          return places;
-          // return [];
-        }),
-        tap((places) => {
-          this._places.next(places);
-        })
-      );
+        }
+        return places;
+        // return [];
+      }),
+      tap((places) => {
+        this._places.next(places);
+      })
+    );
   }
 
-  getPlace(id: any) {
-    return this.http
-      .get<PlaceData>(
-        `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places/${id}.json`
-      )
-      .pipe(
-        map((placeData) => {
-          return new Place(
-            id,
-            placeData.title,
-            placeData.description,
-            placeData.imageUrl,
-            placeData.price,
-            new Date(placeData.availableFrom),
-            new Date(placeData.availableTo),
-            placeData.userId
-          );
-        })
-      );
+  getPlace(id: string | null) {
+    return this.authService.token.pipe(
+      take(1),
+      switchMap((token) => {
+        return this.http.get<PlaceData>(
+          `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places/${id}.json?auth=${token}`
+        );
+      }),
+      map((placeData) => {
+        return new Place(
+          id,
+          placeData.title,
+          placeData.description,
+          placeData.imageUrl,
+          placeData.price,
+          new Date(placeData.availableFrom),
+          new Date(placeData.availableTo),
+          placeData.userId
+        );
+      })
+    );
   }
 
   addPlace(
@@ -123,35 +127,47 @@ export class PlacesService {
     dateTo?: Date
   ) {
     let generatedId: string;
-    const newPlace = new Place(
-      Math.random().toString(),
-      title,
-      description,
-      'https://lonelyplanetimages.imgix.net/mastheads/GettyImages-538096543_medium.jpg?sharp=10&vib=20&w=1200',
-      price,
-      dateFrom,
-      dateTo,
-      this.authService.userId
-    );
-    return this.http
-      .post<{ name: string }>(
-        'https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places.json',
-        {
-          ...newPlace,
-          id: null,
+    let fetchedUserId: string | null;
+    let newPlace: Place;
+    return this.authService.userId.pipe(
+      take(1),
+      switchMap((userId) => {
+        fetchedUserId = userId;
+        return this.authService.token;
+      }),
+      take(1),
+      switchMap((token) => {
+        if (!fetchedUserId) {
+          throw new Error('No user found!');
         }
-      )
-      .pipe(
-        switchMap((resData) => {
-          generatedId = resData.name;
-          return this.places;
-        }),
-        take(1),
-        tap((places) => {
-          newPlace.id = generatedId;
-          this._places.next(places.concat(newPlace));
-        })
-      );
+        newPlace = new Place(
+          Math.random().toString(),
+          title,
+          description,
+          'https://lonelyplanetimages.imgix.net/mastheads/GettyImages-538096543_medium.jpg?sharp=10&vib=20&w=1200',
+          price,
+          dateFrom,
+          dateTo,
+          fetchedUserId
+        );
+        return this.http.post<{ name: string }>(
+          `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places.json?auth=${token}`,
+          {
+            ...newPlace,
+            id: null,
+          }
+        );
+      }),
+      switchMap((resData) => {
+        generatedId = resData.name;
+        return this.places;
+      }),
+      take(1),
+      tap((places) => {
+        newPlace.id = generatedId;
+        this._places.next(places.concat(newPlace));
+      })
+    );
     // return this.places.pipe(
     //   take(1),
     //   delay(1000),
@@ -163,7 +179,13 @@ export class PlacesService {
 
   updatePlace(placeId?: string, title?: string, description?: string) {
     let updatedPlaces: Place[];
-    return this.places.pipe(
+    let fetchedToken: string | null;
+    return this.authService.token.pipe(
+      take(1),
+      switchMap((token) => {
+        fetchedToken = token;
+        return this.places;
+      }),
       take(1),
       switchMap((places) => {
         if (!places || places.length <= 0) {
@@ -187,7 +209,7 @@ export class PlacesService {
           oldPlace.userId
         );
         return this.http.put(
-          `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places/${placeId}.json`,
+          `https://ionic-angular-b5d84-default-rtdb.asia-southeast1.firebasedatabase.app/offered-places/${placeId}.json?auth=${fetchedToken}`,
           { ...updatedPlaces[updatedPlaceIndex], id: null }
         );
       }),
